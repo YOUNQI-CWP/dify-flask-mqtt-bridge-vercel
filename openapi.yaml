@@ -3,15 +3,12 @@ info:
   title: Smart Home MQTT API (v2.1)
   description: |-
     一个为 Dify 智能体设计的、通过后端状态缓存与 MQTT 交互的智能家居 API (V2.1)。
-    【新版特性】数据结构已更新，增加了`device_description`字段，并移除了原`status`内的`power`字段。
     - 使用 `list_online_devices` 获取所有在线设备。
     - 使用 `get_device_status` 查询指定设备的最新状态。
     - 使用 `control_device` 向设备发送控制指令。
   version: 2.1.0
 servers:
-  # 【重要】部署后，请将此 URL 替换为你的公网可访问的 Flask 服务器地址
-  # Dify智能体需要能够直接访问此地址来调用工具API。
-  - url: http://192.168.219.201:8080/api 
+  - url: https://api.mqttools.youngqi.cn/api 
 
 paths:
   /devices:
