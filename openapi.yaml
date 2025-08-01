@@ -1,0 +1,230 @@
+openapi: 3.0.3
+info:
+  title: Smart Home MQTT API (v2.1)
+  description: |-
+    一个为 Dify 智能体设计的、通过后端状态缓存与 MQTT 交互的智能家居 API (V2.1)。
+    【新版特性】数据结构已更新，增加了`device_description`字段，并移除了原`status`内的`power`字段。
+    - 使用 `list_online_devices` 获取所有在线设备。
+    - 使用 `get_device_status` 查询指定设备的最新状态。
+    - 使用 `control_device` 向设备发送控制指令。
+  version: 2.1.0
+servers:
+  # 【重要】部署后，请将此 URL 替换为你的公网可访问的 Flask 服务器地址
+  # Dify智能体需要能够直接访问此地址来调用工具API。
+  - url: http://192.168.219.201:8080/api 
+
+paths:
+  /devices:
+    get:
+      summary: "查询当前在线设备列表"
+      description: "从后端缓存中获取所有当前状态为 'online' 的设备列表及其简要信息。"
+      operationId: list_online_devices
+      responses:
+        '200':
+          description: "成功获取在线设备列表。"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    device_id:
+                      type: string
+                      description: "设备唯一ID"
+                    device_description:
+                      type: string
+                      description: "设备的人性化描述, 例如 '客厅灯'"
+                    device_type:
+                      type: string
+                      description: "设备类型, 例如 'light'"
+                    last_reported_time:
+                      type: number
+                      description: "设备最后上报数据的时间戳"
+                    status_summary:
+                      type: string
+                      description: "设备当前状态的文本摘要"
+              example:
+                - device_id: "light_livingroom_001"
+                  device_description: "客厅灯"
+                  device_type: "light"
+                  last_reported_time: 1717401660
+                  status_summary: "灯已开启，亮度70%"
+                - device_id: "sensor_th_office_001"
+                  device_description: "办公室温湿度计"
+                  device_type: "sensor_th"
+                  last_reported_time: 1717401780
+                  status_summary: "传感器在线，数据正常"
+
+  /devices/{device_id}/status:
+    get:
+      summary: "查询指定设备状态"
+      description: "从后端缓存中获取指定设备的最新、最完整的状态信息。"
+      operationId: get_device_status
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          description: "需要查询的设备唯一ID, 例如 'light_livingroom_001'。"
+          schema:
+            type: string
+      responses:
+        '200':
+          description: "成功获取设备状态。"
+          content:
+            application/json:
+              schema:
+                # 引用更新后的组件
+                $ref: '#/components/schemas/DeviceFullStatus'
+        '404':
+          description: "未在缓存中找到该设备。"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /devices/{device_id}/command:
+    post:
+      summary: "控制指定设备"
+      description: "向指定设备发送一个控制指令，并等待一小段时间以获取状态更新的确认。注意：'set_power' 作为一个抽象指令被保留，设备端需要将其解释为具体的状态变化（如亮度变为0）。"
+      operationId: control_device
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          description: "需要控制的设备唯一ID, 例如 'fan_bedroom_001'。"
+          schema:
+            type: string
+      requestBody:
+        required: true
+        description: "包含具体操作和值的指令对象。"
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                action:
+                  type: string
+                  description: "要执行的动作。'set_power' 是一个逻辑指令，由设备固件转换为具体的状态（如 set_brightness: 0）。"
+                  enum: [set_power, set_brightness, set_color, set_fan_speed]
+                value:
+                  type: "string"
+                  description: "与动作对应的值。例如，对于'set_power'是'on'/'off'；对于'set_brightness'是'80'；对于'set_color'是'#FFD700';对于'set_fan_speed'是'3'。"
+              required: [action]
+            examples:
+              turn_on_light:
+                summary: "开灯"
+                value:
+                  action: "set_power"
+                  value: "on"
+              set_fan_speed:
+                summary: "设置风扇速度"
+                value:
+                  action: "set_fan_speed"
+                  value: "3"
+
+      responses:
+        '200':
+          description: "指令发送成功，并已确认设备状态更新。"
+          content:
+            application/json:
+              schema:
+                # 引用更新后的组件
+                $ref: '#/components/schemas/DeviceFullStatus'
+        '400':
+          description: "无效的指令或参数。"
+        '408':
+          description: "指令已发送，但在超时时间内未收到设备的状态更新确认。"
+
+components:
+  schemas:
+    DeviceFullStatus:
+      type: object
+      description: "描述一个设备完整状态的通用数据结构 (v2.1)"
+      properties:
+        device_id:
+          type: string
+          description: "设备的全局唯一标识符"
+        device_description:
+          type: string
+          description: "设备的人性化描述，便于用户理解"
+        device_type:
+          type: string
+          description: "设备类型"
+        timestamp:
+          type: integer
+          format: int64
+          description: "状态上报时的Unix时间戳"
+        status:
+          type: object
+          description: "设备的核心状态属性"
+          properties:
+            online:
+              type: boolean
+              description: "设备是否在线"
+            brightness:
+              type: integer
+              description: "亮度 (0-100)，仅适用于灯具"
+              nullable: true
+            color:
+              type: string
+              description: "颜色 (HEX格式)，仅适用于灯具"
+              nullable: true
+            temperature:
+              type: number
+              format: float
+              description: "温度 (摄氏度)，仅适用于传感器"
+              nullable: true
+            humidity:
+              type: number
+              format: float
+              description: "湿度 (%)，仅适用于传感器"
+              nullable: true
+            fan_speed:
+              type: integer
+              description: "风扇速度档位(0-5)，仅适用于风扇"
+              nullable: true
+            mode:
+              type: string
+              description: "设备工作模式, e.g., 'normal', 'sleep'"
+              nullable: true
+            text_data:
+              type: string
+              description: "设备状态的自然语言描述"
+            error_code:
+              type: integer
+              description: "错误码, 0表示正常"
+            firmware_version:
+              type: string
+              description: "固件版本号"
+              nullable: true
+        command_ack:
+          type: object
+          description: "对先前命令的响应确认 (可选)"
+          nullable: true
+          properties:
+            command_id:
+              type: string
+            success:
+              type: boolean
+            message:
+              type: string
+      example:
+        device_id: "light_livingroom_001"
+        device_description: "客厅灯"
+        device_type: "light"
+        timestamp: 1717401660
+        status:
+          online: true
+          brightness: 70
+          color: "#FFD700"
+          text_data: "灯已开启，亮度70%"
+          error_code: 0
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: "错误信息描述"
+
